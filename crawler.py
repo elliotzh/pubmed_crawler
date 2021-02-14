@@ -3,12 +3,20 @@ from multiprocessor import MultiProcessor
 from os import path
 import json
 import os
+from typing import Dict, List, Optional
 
-class NatureCrawler:
-    def __init__(self, processor: MultiProcessor, journal_name: str, data_dir: str):
+
+class PubMedCrawler:
+    def __init__(self, processor: Optional[MultiProcessor], journal_name: str, data_dir: str):
         self._processor = processor
+        if processor is None:
+            self.reset_processor()
+
         self._journal_name = journal_name
         self._data_dir = data_dir
+
+    def reset_processor(self):
+        self._processor = MultiProcessor()
 
     @property
     def journal_name(self) -> str:
@@ -44,33 +52,10 @@ class NatureCrawler:
 
     @classmethod
     def parse_origin_link(cls, origin_url):
-        nature_id = origin_url.split("nature")[-1]
-        return "https://www.nature.com/articles/nature{}".format(nature_id)
+        raise NotImplementedError()
 
-    def get_info(self, content):
-        info_dict = {}
-        if content.find("No abstract available") is not -1:
-            return None
-        if content.find("Sorry, the page you requested is unavailable. "
-                        "The link you requested might be broken, or no longer exist.") is not -1:
-            return None
-        soup = BeautifulSoup(content, features="html.parser")
-
-        info_dict["Type"] = self.get_doc_type(soup)
-
-        title = soup.find("h1", {"class": "c-article-title"})
-        info_dict["Title"] = title.text
-
-        abstract = soup.find("div", {"id": "Abs1-content"})
-        if abstract is None:
-            return None
-        info_dict["Abstract"] = abstract.text
-        return info_dict
-
-    @classmethod
-    def get_doc_type(cls, soup):
-        breadcrumb = soup.find("li", {"id": "breadcrumb1"})
-        return breadcrumb.span.text
+    def get_info(self, content) -> Dict[str, str]:
+        raise NotImplementedError()
 
     def scrape_index(self, year):
         self.processor.scrape_all(
@@ -82,9 +67,8 @@ class NatureCrawler:
             early_stop_func=self.get_max_page
         )
         print("Index scraped.")
-        return True
 
-    def extract_detail_page_list(self, year):
+    def extract_detail_page_list(self, year) -> Optional[List[str]]:
         base_path = "{}{}\\{}".format(self.data_dir, self.journal_name, year)
         if not path.isdir(base_path):
             return None
@@ -143,8 +127,43 @@ class NatureCrawler:
         )
 
 
+class NatureCrawler(PubMedCrawler):
+    def __init__(self, processor: Optional[MultiProcessor], journal_name: str, data_dir: str):
+        super(NatureCrawler, self).__init__(processor, journal_name, data_dir)
+
+    @classmethod
+    def parse_origin_link(cls, origin_url):
+        nature_id = origin_url.split("nature")[-1]
+        return "https://www.nature.com/articles/nature{}".format(nature_id)
+
+    def get_info(self, content):
+        info_dict = {}
+        if content.find("No abstract available") is not -1:
+            return None
+        if content.find("Sorry, the page you requested is unavailable. "
+                        "The link you requested might be broken, or no longer exist.") is not -1:
+            return None
+        soup = BeautifulSoup(content, features="html.parser")
+
+        info_dict["Type"] = self.get_doc_type(soup)
+
+        title = soup.find("h1", {"class": "c-article-title"})
+        info_dict["Title"] = title.text
+
+        abstract = soup.find("div", {"id": "Abs1-content"})
+        if abstract is None:
+            return None
+        info_dict["Abstract"] = abstract.text
+        return info_dict
+
+    @classmethod
+    def get_doc_type(cls, soup):
+        breadcrumb = soup.find("li", {"id": "breadcrumb1"})
+        return breadcrumb.span.text
+
+
 class NatureSubCrawler(NatureCrawler):
-    def __init__(self, processor: MultiProcessor, journal_name: str, data_dir: str):
+    def __init__(self, processor: Optional[MultiProcessor], journal_name: str, data_dir: str):
         super(NatureSubCrawler, self).__init__(processor, journal_name, data_dir)
 
     @classmethod
@@ -158,21 +177,63 @@ class NatureSubCrawler(NatureCrawler):
         return breadcrumb.span.text
 
 
+class ScienceCrawler(PubMedCrawler):
+    def __init__(self, processor: Optional[MultiProcessor], journal_name: str, data_dir: str):
+        super(ScienceCrawler, self).__init__(processor, journal_name, data_dir)
+
+    @classmethod
+    def parse_origin_link(cls, origin_url):
+        nature_id = origin_url.split("nature")[-1]
+        return "https://www.nature.com/articles/nature{}".format(nature_id)
+
+    def get_info(self, content):
+        info_dict = {}
+        if content.find("No abstract available") is not -1:
+            return None
+        if content.find("Sorry, the page you requested is unavailable. "
+                        "The link you requested might be broken, or no longer exist.") is not -1:
+            return None
+        soup = BeautifulSoup(content, features="html.parser")
+
+        info_dict["Type"] = self.get_doc_type(soup)
+
+        title = soup.find("h1", {"class": "c-article-title"})
+        info_dict["Title"] = title.text
+
+        abstract = soup.find("div", {"id": "Abs1-content"})
+        if abstract is None:
+            return None
+        info_dict["Abstract"] = abstract.text
+        return info_dict
+
+    @classmethod
+    def get_doc_type(cls, soup):
+        breadcrumb = soup.find("li", {"id": "breadcrumb1"})
+        return breadcrumb.span.text
+
+
 def __main__():
-    processor = MultiProcessor()
     data_dir = "E:\\temp\\secret\\"
 
-    journal_names = ["Nature", "Nature Methods", "Nature Communications", "Nature Biotechnology"]
+    journal_names = [
+        # "Nature",
+        "Nature Methods", "Nature Communications", "Nature Biotechnology",
+        # "Science",
+        # "Science advances", "Science signaling", "Science Translational Medicine"
+    ]
     for journal_name in journal_names:
         if journal_name == "Nature":
-            crawler = NatureCrawler(processor, journal_name, data_dir)
+            crawler = NatureCrawler(None, journal_name, data_dir)
         elif journal_name.startswith("Nature"):
-            crawler = NatureSubCrawler(processor, journal_name, data_dir)
+            crawler = NatureSubCrawler(None, journal_name, data_dir)
+        elif journal_name.startswith("Science"):
+            crawler = ScienceCrawler(None, journal_name, data_dir)
         else:
             continue
 
         # all docs
         for year in range(2010, 2021):
+            crawler.reset_processor()
             print("Year:{} Journal: {}".format(year, journal_name))
             crawler.scrape_index(year)
 
