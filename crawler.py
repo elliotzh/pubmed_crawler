@@ -48,7 +48,7 @@ class PubMedCrawler:
             link_div = soup.find("div", {"class": "full-text-links-list"})
             if link_div is None:
                 return None
-        return cls.parse_origin_link(link_div.a["href"])
+        return link_div.a["href"]
 
     @classmethod
     def parse_origin_link(cls, origin_url):
@@ -112,7 +112,8 @@ class PubMedCrawler:
         self.processor.scrape_all(
             self.source_dir,
             yearly_doc_ids,
-            lambda x: self.get_source_link(x, self.pubmed_dir)
+            lambda x: self.get_source_link(x, self.pubmed_dir),
+            need_redirect=True
         )
         print("Source pages scraped.\n")
 
@@ -149,6 +150,10 @@ class NatureCrawler(PubMedCrawler):
 
         title = soup.find("h1", {"class": "c-article-title"})
         info_dict["Title"] = title.text
+
+        meta = soup.find("p", {"class": "c-article-info-details"})
+        if meta is not None:
+            info_dict["Meta"] = meta.text
 
         abstract = soup.find("div", {"id": "Abs1-content"})
         if abstract is None:
@@ -188,38 +193,35 @@ class ScienceCrawler(PubMedCrawler):
 
     def get_info(self, content):
         info_dict = {}
-        if content.find("No abstract available") is not -1:
-            return None
-        if content.find("Sorry, the page you requested is unavailable. "
-                        "The link you requested might be broken, or no longer exist.") is not -1:
-            return None
         soup = BeautifulSoup(content, features="html.parser")
 
-        info_dict["Type"] = self.get_doc_type(soup)
+        info_dict["Type"] = soup.find("span", {"class": "overline__section"}).text
 
-        title = soup.find("h1", {"class": "c-article-title"})
+        title = soup.find("h1", {"class": "article__headline"})
         info_dict["Title"] = title.text
 
-        abstract = soup.find("div", {"id": "Abs1-content"})
+        abstract = soup.find("div", {"class": "section abstract"})
         if abstract is None:
             return None
         info_dict["Abstract"] = abstract.text
+        if info_dict["Abstract"].startswith("Abstract"):
+            info_dict["Abstract"] = info_dict["Abstract"][8:]
+        info_dict["Meta"] = str(soup.find("div", {"class": "meta-line"}))
         return info_dict
-
-    @classmethod
-    def get_doc_type(cls, soup):
-        breadcrumb = soup.find("li", {"id": "breadcrumb1"})
-        return breadcrumb.span.text
 
 
 def __main__():
     data_dir = "E:\\temp\\secret\\"
 
     journal_names = [
-        # "Nature",
-        "Nature Methods", "Nature Communications", "Nature Biotechnology",
-        # "Science",
-        # "Science advances", "Science signaling", "Science Translational Medicine"
+        "Science",
+        "Science advances",
+        "Science signaling",
+        "Science Translational Medicine",
+        "Nature",
+        "Nature Methods",
+        "Nature Communications",
+        "Nature Biotechnology",
     ]
     for journal_name in journal_names:
         if journal_name == "Nature":
@@ -232,7 +234,7 @@ def __main__():
             continue
 
         # all docs
-        for year in range(2010, 2021):
+        for year in range(2020, 2009, -1):
             crawler.reset_processor()
             print("Year:{} Journal: {}".format(year, journal_name))
             crawler.scrape_index(year)
