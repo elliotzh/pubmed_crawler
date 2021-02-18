@@ -34,7 +34,10 @@ class PubMedCrawler:
     def get_max_page(cls, content):
         soup = BeautifulSoup(content, features="html.parser")
         amount = soup.find("div", {"class": "results-amount"})
-        item_count = int(amount.span.text.replace(',', ''))
+        try:
+            item_count = int(amount.span.text.replace(',', ''))
+        except AttributeError:
+            return 0
         return divmod(item_count, 10)[0] + 1
 
     @classmethod
@@ -244,9 +247,9 @@ def __main__():
                 continue
 
             crawler.scrape_pubmed_detail_pages(yearly_doc_ids)
-            crawler.scrape_source_detail_pages(yearly_doc_ids)
-
-            crawler.extract_info(yearly_doc_ids)
+            # crawler.scrape_source_detail_pages(yearly_doc_ids)
+            #
+            # crawler.extract_info(yearly_doc_ids)
 
 
 if __name__ == "__main__":

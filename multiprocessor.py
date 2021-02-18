@@ -7,6 +7,7 @@ import json
 from multiprocessing.pool import ThreadPool
 from bs4 import BeautifulSoup
 import requests
+import sys
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -42,6 +43,8 @@ class MultiProcessor:
                 max_i = early_stop_func(first_page_file.read())
                 first_page_file.close()
             assert max_i <= 1000
+            if max_i == 0:
+                return
 
         for i, _ in enumerate(self._thread_pool.imap(self.scrape_one, target_names[:max_i], chunksize=self._chunk_size)):
             if divmod(i, 1000)[1] == 0:
@@ -65,8 +68,9 @@ class MultiProcessor:
                 target_url = self.expand_url(target_url)
             r = s.get(target_url, allow_redirects=1, verify=False)
             assert r.status_code == 200
-        except AssertionError:
-            print("can't access pubmed doc {}".format(target_name))
+        except:
+            exc_type, e, trace = sys.exc_info()
+            print("met {}({}) in request for pubmed doc {}".format(str(exc_type), str(e), target_name))
             return target_name
         with open(self.get_target_path(target_name), "wb") as html_file:
             html_file.write(r.content)
