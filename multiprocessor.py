@@ -23,6 +23,7 @@ class MultiProcessor:
         self._target_suffix = ""
 
         self._process_func = lambda x: x
+        self._reprocess = False
         self._need_redirect = False
 
     def scrape_all(self, local_dir, target_names, url_func, early_stop_func=None, target_suffix="html", need_redirect=False):
@@ -78,8 +79,10 @@ class MultiProcessor:
         return target_name
 
     def process_one(self, target_name):
-        input_path = self._url_func(target_name)
         output_path = path.join(self._local_dir, "{}.{}".format(target_name, self._target_suffix))
+        if self._reprocess is False and path.isfile(output_path):
+            return
+        input_path = self._url_func(target_name)
         if not path.isfile(input_path):
             return
         with open(input_path, "r", encoding="utf-8") as infile:
@@ -104,6 +107,19 @@ class MultiProcessor:
 
         if not path.isdir(self._local_dir):
             os.makedirs(self._local_dir)
+
+        if len(target_names) is not 0:
+            existed_first_output_path = path.join(self._local_dir, "{}.{}".format(target_names[0], self._target_suffix))
+            if path.isfile(existed_first_output_path):
+                with open(existed_first_output_path, "r", encoding="utf-8") as cache_file:
+                    old = cache_file.read()
+                    cache_file.close()
+                self._reprocess = True
+                self.process_one(target_name=target_names[0])
+                with open(existed_first_output_path, "r", encoding="utf-8") as cache_file:
+                    new = cache_file.read()
+                    cache_file.close()
+                self._reprocess = (old != new)
 
         for i, _ in enumerate(
                 self._thread_pool.imap(self.process_one, target_names, chunksize=self._chunk_size)):

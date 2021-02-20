@@ -42,16 +42,20 @@ class PubMedCrawler:
 
     @classmethod
     def get_source_link(cls, i, base_dir):
-        with open("{}\\{}.html".format(base_dir, i), "r", encoding="utf-8") as pubmed_file:
-            content = pubmed_file.read()
-            if content.find("full-text-links-list") is -1:
-                return None
-            pubmed_file.close()
-            soup = BeautifulSoup(content, features="html.parser")
-            link_div = soup.find("div", {"class": "full-text-links-list"})
-            if link_div is None:
-                return None
-        return link_div.a["href"]
+        pubmed_path = "{}\\{}.html".format(base_dir, i)
+        if path.isfile(pubmed_path):
+            with open(pubmed_path, "r", encoding="utf-8") as pubmed_file:
+                content = pubmed_file.read()
+                if content.find("full-text-links-list") is -1:
+                    return None
+                pubmed_file.close()
+                soup = BeautifulSoup(content, features="html.parser")
+                link_div = soup.find("div", {"class": "full-text-links-list"})
+                if link_div is None:
+                    return None
+            return link_div.a["href"]
+        else:
+            return None
 
     @classmethod
     def parse_origin_link(cls, origin_url):
@@ -247,9 +251,9 @@ def __main__():
                 continue
 
             crawler.scrape_pubmed_detail_pages(yearly_doc_ids)
-            # crawler.scrape_source_detail_pages(yearly_doc_ids)
-            #
-            # crawler.extract_info(yearly_doc_ids)
+            crawler.scrape_source_detail_pages(yearly_doc_ids)
+
+            crawler.extract_info(yearly_doc_ids)
 
 
 if __name__ == "__main__":
