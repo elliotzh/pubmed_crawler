@@ -3,7 +3,50 @@ from multiprocessor import MultiProcessor
 from os import path
 import json
 import os
+import csv
 from typing import Dict, List, Optional
+
+
+class ArticleInfo:
+    def __init__(self, pubmed_id, journal_name):
+        self.pubmed_id = pubmed_id
+        self.journal_name = journal_name
+        self.abstract = ""
+        self.article_type = "Unknown"
+        self.title = "Unknown"
+        self.meta = "Unknown"
+        self.date = "Unknown"
+        self.subject = "Unknown"
+        self.publication_type = "Unknown"
+
+    @property
+    def is_valid(self):
+        for content in [
+            # self.abstract,
+            # self.article_type,
+            self.title,
+            # self.meta
+        ]:
+            if content != "Unknown":
+                return True
+        return False
+
+    def dump(self):
+        return {
+            "Journal": self.journal_name,
+            "Id": self.pubmed_id,
+            "PublicationType": self.publication_type,
+            "Type": self.article_type,
+            "Subject": self.subject,
+            "Title": self.title,
+            "Abstract": self.abstract,
+            "Date": self.date,
+            "Meta": self.meta
+        }
+
+    @classmethod
+    def fieldnames(cls):
+        return ["Journal", "Id", "PublicationType", "Type", "Subject", "Title", "Abstract", "Date", "Meta"]
 
 
 class PubMedCrawler:
@@ -61,8 +104,43 @@ class PubMedCrawler:
     def parse_origin_link(cls, origin_url):
         raise NotImplementedError()
 
-    def get_info(self, content) -> Dict[str, str]:
-        raise NotImplementedError()
+    def extract_info(self, target_name) -> ArticleInfo:
+        article_info = ArticleInfo(target_name, self.journal_name)
+        pubmed_path = "{}\\{}.html".format(self.pubmed_dir, target_name)
+        if not path.isfile(pubmed_path):
+            return article_info
+
+        with open(pubmed_path, "r", encoding="utf-8") as pubmed_file:
+            soup = BeautifulSoup(pubmed_file.read(), features="html.parser")
+            pubmed_file.close()
+        major_content = soup.find("main", {"class": "article-details"})
+        if major_content is None:
+            return article_info
+        article_info.title = major_content.find("h1", {"class": "heading-title"}).text.strip()
+        origin_meta = major_content.find("span", {"class": "cit"}).text.strip()
+        try:
+            article_info.date, article_info.meta = origin_meta.split(";", 1)
+        except ValueError:
+            article_info.meta = origin_meta
+
+        abstract_tag = major_content.find("div", {"id": "enc-abstract"})
+        if abstract_tag is not None:
+            article_info.abstract = abstract_tag.text.strip()
+
+        publication_type_tag = major_content.find("div", {"class": "publication-type"})
+        if publication_type_tag is not None:
+            article_info.publication_type = publication_type_tag.text.strip()
+
+        source_path = "{}\\{}.html".format(self.source_dir, target_name)
+        if path.isfile(source_path):
+            with open(source_path, "r", encoding="utf-8") as source_file:
+                soup = BeautifulSoup(source_file.read(), features="html.parser")
+                self.update_info_from_source(article_info, soup)
+
+        return article_info
+
+    def update_info_from_source(self, article_info: ArticleInfo, content):
+        pass
 
     def scrape_index(self, year):
         self.processor.scrape_all(
@@ -107,6 +185,10 @@ class PubMedCrawler:
     def source_dir(self) -> str:
         return "{}{}\\all_source".format(self.data_dir, self.journal_name)
 
+    @property
+    def result_dir(self) -> str:
+        return "{}{}\\all_results".format(self.data_dir, self.journal_name)
+
     def scrape_pubmed_detail_pages(self, yearly_doc_ids):
         self.processor.scrape_all(
             self.pubmed_dir,
@@ -124,15 +206,36 @@ class PubMedCrawler:
         )
         print("Source pages scraped.\n")
 
-    def extract_info(self, yearly_doc_ids):
-        result_dir = "E:\\temp\\secret\\{}\\all_results".format(self.journal_name)
+    def extract_info_for_all(self, yearly_doc_ids, for_test=False):
+        if for_test is True:
+            all_articles = []
+            for doc_id in yearly_doc_ids:
+                all_articles.append(self.extract_info(doc_id))
 
-        self.processor.process_all(
-            input_func=lambda x: "{}\\{}.html".format(self.source_dir, x),
-            output_dir=result_dir,
-            target_names=yearly_doc_ids,
-            process_func=lambda x: self.get_info(x)
-        )
+            with open(path.join(self.data_dir, self.journal_name, "results.csv"), "w", encoding="utf-8", newline="") as results_file:
+                writer = csv.DictWriter(results_file, ArticleInfo.fieldnames())
+                writer.writeheader()
+                for article in all_articles:
+                    writer.writerow(article.dump())
+                results_file.close()
+        else:
+            self.processor.process_all(
+                process_func=lambda x: self.extract_info(x).dump(),
+                target_names=yearly_doc_ids,
+                output_dir=path.join(self.data_dir, self.journal_name, "all_results")
+            )
+
+    def merge_results(self):
+        with open(path.join(self.data_dir, self.journal_name, "results.csv"), "w", encoding="utf-8",
+                  newline="") as results_file:
+            writer = csv.DictWriter(results_file, ArticleInfo.fieldnames())
+            writer.writeheader()
+            for base, dirs, files in os.walk(self.result_dir):
+                for file in files:
+                    with open(path.join(base, file), "r", encoding="utf-8") as json_file:
+                        writer.writerow(json.load(json_file))
+                        json_file.close()
+            results_file.close()
 
 
 class NatureCrawler(PubMedCrawler):
@@ -144,34 +247,10 @@ class NatureCrawler(PubMedCrawler):
         nature_id = origin_url.split("nature")[-1]
         return "https://www.nature.com/articles/nature{}".format(nature_id)
 
-    def get_info(self, content):
-        info_dict = {}
-        if content.find("No abstract available") is not -1:
-            return None
-        if content.find("Sorry, the page you requested is unavailable. "
-                        "The link you requested might be broken, or no longer exist.") is not -1:
-            return None
-        soup = BeautifulSoup(content, features="html.parser")
-
-        info_dict["Type"] = self.get_doc_type(soup)
-
-        title = soup.find("h1", {"class": "c-article-title"})
-        info_dict["Title"] = title.text
-
-        meta = soup.find("p", {"class": "c-article-info-details"})
-        if meta is not None:
-            info_dict["Meta"] = meta.text
-
-        abstract = soup.find("div", {"id": "Abs1-content"})
-        if abstract is None:
-            return None
-        info_dict["Abstract"] = abstract.text
-        return info_dict
-
-    @classmethod
-    def get_doc_type(cls, soup):
+    def update_info_from_source(self, article_info: ArticleInfo, soup):
         breadcrumb = soup.find("li", {"id": "breadcrumb1"})
-        return breadcrumb.span.text
+        if breadcrumb is not None:
+            article_info.article_type = breadcrumb.span.text
 
 
 class NatureSubCrawler(NatureCrawler):
@@ -183,10 +262,9 @@ class NatureSubCrawler(NatureCrawler):
         nature_id = origin_url.split("/")[-1]
         return "https://www.nature.com/articles/{}".format(nature_id)
 
-    @classmethod
-    def get_doc_type(cls, soup):
+    def update_info_from_source(self, article_info: ArticleInfo, soup):
         breadcrumb = soup.find("li", {"id": "breadcrumb2"})
-        return breadcrumb.span.text
+        article_info.article_type = breadcrumb.span.text
 
 
 class ScienceCrawler(PubMedCrawler):
@@ -198,31 +276,23 @@ class ScienceCrawler(PubMedCrawler):
         nature_id = origin_url.split("nature")[-1]
         return "https://www.nature.com/articles/nature{}".format(nature_id)
 
-    def get_info(self, content):
-        info_dict = {}
-        soup = BeautifulSoup(content, features="html.parser")
-
-        info_dict["Type"] = soup.find("span", {"class": "overline__section"}).text
-
-        title = soup.find("h1", {"class": "article__headline"})
-        info_dict["Title"] = title.text
-
-        abstract = soup.find("div", {"class": "section abstract"})
-        if abstract is None:
-            return None
-        info_dict["Abstract"] = abstract.text
-        if info_dict["Abstract"].startswith("Abstract"):
-            info_dict["Abstract"] = info_dict["Abstract"][8:]
-        info_dict["Meta"] = str(soup.find("div", {"class": "meta-line"}))
-        return info_dict
+    def update_info_from_source(self, article_info: ArticleInfo, soup):
+        header = soup.find("header", {"class": "article__header"})
+        overline = header.find("div", {"class": "overline"})
+        article_type = overline.find("span", {"class": "overline__section"})
+        if article_type is None:
+            article_info.article_type = overline.text.strip()
+        else:
+            article_info.article_type = article_type.text
+            article_info.subject = overline.find("span", {"class": "overline__subject"}).text.strip()
 
 
 def __main__():
     data_dir = "E:\\temp\\secret\\"
 
     journal_names = [
-        "Science",
         "Science advances",
+        "Science",
         "Science signaling",
         "Science Translational Medicine",
         "Nature",
@@ -253,7 +323,9 @@ def __main__():
             crawler.scrape_pubmed_detail_pages(yearly_doc_ids)
             crawler.scrape_source_detail_pages(yearly_doc_ids)
 
-            crawler.extract_info(yearly_doc_ids)
+            crawler.extract_info_for_all(yearly_doc_ids)
+
+        crawler.merge_results()
 
 
 if __name__ == "__main__":

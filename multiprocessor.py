@@ -82,26 +82,13 @@ class MultiProcessor:
         output_path = path.join(self._local_dir, "{}.{}".format(target_name, self._target_suffix))
         if self._reprocess is False and path.isfile(output_path):
             return
-        input_path = self._url_func(target_name)
-        if not path.isfile(input_path):
-            return
-        with open(input_path, "r", encoding="utf-8") as infile:
-            try:
-                output = self._process_func(infile.read())
-            except:
-                infile.close()
-                print("Met error in parsing pubmed doc {}.".format(target_name))
-                return
-            infile.close()
+        obj = self._process_func(target_name)
+        with open(output_path, "w", encoding="utf-8") as outfile:
+            json.dump(obj, outfile, indent=2)
+            outfile.close()
 
-            if output is not None:
-                with open(output_path, "w", encoding="utf-8") as outfile:
-                    json.dump(output, outfile, indent=2)
-                    outfile.close()
-
-    def process_all(self, input_func, output_dir, target_names, process_func, target_suffix="json"):
+    def process_all(self, target_names, process_func, output_dir, target_suffix="json"):
         self._process_func = process_func
-        self._url_func = input_func
         self._local_dir = output_dir
         self._target_suffix = target_suffix
 
