@@ -133,9 +133,12 @@ class PubMedCrawler:
 
         source_path = "{}\\{}.html".format(self.source_dir, target_name)
         if path.isfile(source_path):
-            with open(source_path, "r", encoding="utf-8") as source_file:
-                soup = BeautifulSoup(source_file.read(), features="html.parser")
-                self.update_info_from_source(article_info, soup)
+            try:
+                with open(source_path, "r", encoding="utf-8") as source_file:
+                    soup = BeautifulSoup(source_file.read(), features="html.parser")
+                    self.update_info_from_source(article_info, soup)
+            except UnicodeDecodeError:
+                article_info.article_type = "DecodeError"
 
         return article_info
 
@@ -226,14 +229,19 @@ class PubMedCrawler:
             )
 
     def merge_results(self):
-        with open(path.join(self.data_dir, self.journal_name, "results.csv"), "w", encoding="utf-8",
+        with open(path.join(self.data_dir, "{}.csv".format(self.journal_name)), "w", encoding="utf-8",
                   newline="") as results_file:
             writer = csv.DictWriter(results_file, ArticleInfo.fieldnames())
             writer.writeheader()
             for base, dirs, files in os.walk(self.result_dir):
                 for file in files:
                     with open(path.join(base, file), "r", encoding="utf-8") as json_file:
-                        writer.writerow(json.load(json_file))
+                        try:
+                            obj = json.load(json_file)
+                        except json.decoder.JSONDecodeError:
+                            target_name = file.split(".")[0]
+                            obj = self.extract_info(target_name).dump()
+                        writer.writerow(obj)
                         json_file.close()
             results_file.close()
 
@@ -264,7 +272,8 @@ class NatureSubCrawler(NatureCrawler):
 
     def update_info_from_source(self, article_info: ArticleInfo, soup):
         breadcrumb = soup.find("li", {"id": "breadcrumb2"})
-        article_info.article_type = breadcrumb.span.text
+        if breadcrumb is not None:
+            article_info.article_type = breadcrumb.span.text
 
 
 class ScienceCrawler(PubMedCrawler):
@@ -279,12 +288,13 @@ class ScienceCrawler(PubMedCrawler):
     def update_info_from_source(self, article_info: ArticleInfo, soup):
         header = soup.find("header", {"class": "article__header"})
         overline = header.find("div", {"class": "overline"})
-        article_type = overline.find("span", {"class": "overline__section"})
-        if article_type is None:
-            article_info.article_type = overline.text.strip()
-        else:
-            article_info.article_type = article_type.text
-            article_info.subject = overline.find("span", {"class": "overline__subject"}).text.strip()
+        if overline is not None:
+            article_type = overline.find("span", {"class": "overline__section"})
+            if article_type is None:
+                article_info.article_type = overline.text.strip()
+            else:
+                article_info.article_type = article_type.text
+                article_info.subject = overline.find("span", {"class": "overline__subject"}).text.strip()
 
 
 def __main__():
@@ -326,6 +336,17 @@ def __main__():
             crawler.extract_info_for_all(yearly_doc_ids)
 
         crawler.merge_results()
+
+    with open(path.join(data_dir, "merged.csv"), "w", encoding="utf-8", newline="") as merged_file:
+        writer = csv.DictWriter(merged_file, ArticleInfo.fieldnames())
+        writer.writeheader()
+        for journal_name in journal_names:
+            with open(path.join(data_dir, "{}.csv".format(journal_name)), "r", encoding="utf-8") as journal_file:
+                reader = csv.DictReader(journal_file)
+                for row in reader:
+                    writer.writerow(row)
+                journal_file.close()
+        merged_file.close()
 
 
 if __name__ == "__main__":
